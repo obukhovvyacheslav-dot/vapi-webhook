@@ -5,85 +5,51 @@ import os
 
 app = Flask(__name__)
 
-# Токен бота читаем из переменной окружения на Render
+# Токен берем из переменной окружения
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = "5912766897"   # Твой Telegram ID
+CHAT_ID = "5912766897"   # твой Telegram ID
 
 
-# -------------------------------------------
-#  Отправка текстового сообщения
-# -------------------------------------------
-def send_text(message: str):
+def send_text(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
-    try:
-        requests.post(url, json=payload)
-    except Exception as e:
-        print("ERROR send_text:", e)
+    requests.post(url, json={"chat_id": CHAT_ID, "text": message})
 
 
-
-# -------------------------------------------
-#  Отправка RAW LOG как файла
-# -------------------------------------------
 def send_log_file(log_data):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-
     files = {
         "document": ("log.json", json.dumps(log_data, ensure_ascii=False), "application/json")
     }
-
     data = {"chat_id": CHAT_ID, "caption": "RAW LOG"}
-
-    try:
-        requests.post(url, data=data, files=files)
-    except Exception as e:
-        print("ERROR send_log_file:", e)
+    requests.post(url, data=data, files=files)
 
 
-
-# -------------------------------------------
-#  Основной обработчик Webhook
-# -------------------------------------------
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
 
-    print("\n=== INCOMING WEBHOOK ===")
-    print(json.dumps(data, indent=2, ensure_ascii=False))
-    print("=========================\n")
-
-    # ---------- ИЩЕМ SUMMARY ВО ВСЕХ ФОРМАТАХ -------------
+    # ----- ИЩЕМ summary ВО ВСЕХ ВОЗМОЖНЫХ МЕСТАХ -----
     summary = None
 
-    # новый формат VAPI (analysis.summary)
-    if isinstance(data, dict) and "analysis" in data:
-        summary = data["analysis"].get("summary")
+    # VAPI "end-of-call-report"
+    if isinstance(data, dict):
+        summary = (
+            data.get("summary")
+            or data.get("analysis", {}).get("summary")
+            or data.get("call", {}).get("analysis", {}).get("summary")
+        )
 
-    # вариант: data["summary"]
-    if not summary:
-        summary = data.get("summary")
-
-    # вариант: data["call"]["analysis"]["summary"]
-    if not summary:
-        summary = data.get("call", {}).get("analysis", {}).get("summary")
-
-    # -------------------------------------------------------
-
+    # ------ ОТПРАВЛЯЕМ summary ИЛИ ПИШЕМ ЧТО ЕГО НЕТ ------
     if summary:
         send_text("SUMMARY:\n" + summary)
     else:
         send_text("SUMMARY: not found")
 
-    # Отправляем RAW JSON
+    # ------ ВСЕГДА ОТПРАВЛЯЕМ RAW LOG ------
     send_log_file(data)
 
     return jsonify({"status": "ok"}), 200
 
 
-
-# -------------------------------------------
-#  Запуск локально (на Render не используется)
-# -------------------------------------------
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
