@@ -5,51 +5,61 @@ import os
 
 app = Flask(__name__)
 
-# Токен берем из переменной окружения
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = "5912766897"   # твой Telegram ID
+CHAT_ID = "5912766897"
+
+def tg_text(msg):
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={"chat_id": CHAT_ID, "text": msg}
+    )
+
+def tg_file(data):
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument",
+        data={"chat_id": CHAT_ID, "caption": "RAW LOG"},
+        files={
+            "document": (
+                "log.json",
+                json.dumps(data, ensure_ascii=False, indent=2),
+                "application/json"
+            )
+        }
+    )
+
+def get_summary(data):
+    paths = [
+        ["analysis", "summary"],
+        ["artifact", "analysis", "summary"],
+        ["call", "analysis", "summary"]
+    ]
+    for p in paths:
+        d = data
+        ok = True
+        for key in p:
+            if key in d:
+                d = d[key]
+            else:
+                ok = False
+                break
+        if ok and isinstance(d, str) and d.strip():
+            return d
+    return None
 
 
-def send_text(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": message})
-
-
-def send_log_file(log_data):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-    files = {
-        "document": ("log.json", json.dumps(log_data, ensure_ascii=False), "application/json")
-    }
-    data = {"chat_id": CHAT_ID, "caption": "RAW LOG"}
-    requests.post(url, data=data, files=files)
-
-
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
+    summary = get_summary(data)
 
-    # ----- ИЩЕМ summary ВО ВСЕХ ВОЗМОЖНЫХ МЕСТАХ -----
-    summary = None
-
-    # VAPI "end-of-call-report"
-    if isinstance(data, dict):
-        summary = (
-            data.get("summary")
-            or data.get("analysis", {}).get("summary")
-            or data.get("call", {}).get("analysis", {}).get("summary")
-        )
-
-    # ------ ОТПРАВЛЯЕМ summary ИЛИ ПИШЕМ ЧТО ЕГО НЕТ ------
     if summary:
-        send_text("SUMMARY:\n" + summary)
+        tg_text("SUMMARY:\n" + summary)
     else:
-        send_text("SUMMARY: not found")
+        tg_text("SUMMARY: not found")
 
-    # ------ ВСЕГДА ОТПРАВЛЯЕМ RAW LOG ------
-    send_log_file(data)
-
-    return jsonify({"status": "ok"}), 200
+    tg_file(data)
+    return jsonify({"ok": True}), 200
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
